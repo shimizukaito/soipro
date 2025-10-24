@@ -32,31 +32,29 @@ app.get("/buttons", async (req, res) => {
   res.json(logs);
 });
 
-// 🔽 新規投稿を保存するAPI
+
 app.post("/posts", async (req, res) => {
-  try {
-    const { content, output, theme, user } = req.body;
+  const { content, output, theme, user, order } = req.body;
 
-    const newPost = await prisma.post.create({
-      data: {
-        content,
-        output,
-        theme,
-        user,
-      },
-    });
+  // 既存の同order投稿を「最新でない」にする
+  await prisma.post.updateMany({
+    where: { theme, order, isLatest: true },
+    data: { isLatest: false },
+  });
 
-    res.status(201).json(newPost);
-  } catch (err) {
-    console.error("Error creating post:", err);
-    res.status(500).json({ error: "DBへの保存に失敗しました" });
-  }
+  // 新しいレコードを最新として追加
+  const post = await prisma.post.create({
+    data: { content, output, theme, user, order, isLatest: true },
+  });
+
+  res.json(post);
 });
 
-// 🔽 投稿一覧を取得するAPI（確認用）
 app.get("/posts", async (req, res) => {
+  const theme = Number(req.query.theme) || 1;
   const posts = await prisma.post.findMany({
-    orderBy: { id: "desc" },
+    where: { theme, isLatest: true },
+    orderBy: { order: "asc" },
   });
   res.json(posts);
 });

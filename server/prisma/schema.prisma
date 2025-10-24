@@ -28,4 +28,6 @@ model Post {
   theme      Int
   user       String
   output     String
+  order      Int
+  isLatest   Boolean  @default(true)
 }
