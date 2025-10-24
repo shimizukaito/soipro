@@ -49,7 +49,9 @@ function AutoResizeTextarea({
 export default function App() {
   const [blocks, setBlocks] = useState([]);
 
-  /** DBへ新しいブロックを保存（既存orderは上書き扱い） */
+  // ================================
+  // DBへ保存
+  // ================================
   async function saveToDatabase(block) {
     try {
       await fetch("http://localhost:3001/posts", {
@@ -60,7 +62,7 @@ export default function App() {
           output: block.type === "code" ? block.output ?? "" : "",
           theme: 1,
           user: "pro助",
-          order: block.order, // ← ここで固定orderを送る
+          order: block.order,
         }),
       });
     } catch (err) {
@@ -68,81 +70,127 @@ export default function App() {
     }
   }
 
-  /** 初回ロード時：theme=1の最新データを取得 */
+  // ================================
+  // 初期ロード：テーマ1の最新状態取得
+  // ================================
   useEffect(() => {
     async function fetchPosts() {
       try {
         const res = await fetch("http://localhost:3001/posts?theme=1");
         const posts = await res.json();
-
-        // order順で並び替えて格納
         const sorted = posts.sort((a, b) => a.order - b.order);
-
         const formatted = sorted.map((p) => ({
           id: p.id,
           type: p.output === "" ? "text" : "code",
           content: p.content,
           output: p.output,
-          order: p.order, // ← DBから取得したorderを保持
+          order: p.order,
         }));
-
         setBlocks(formatted);
       } catch (err) {
         console.error("データ取得エラー:", err);
       }
     }
-
     fetchPosts();
   }, []);
 
-  /** 新しいブロックを追加（orderを固定で決める） */
-  const addBlock = (type) => {
+  // ================================
+  // 新しいブロックを追加
+  // ================================
+  const addBlock = async (type) => {
+    const res = await fetch("http://localhost:3001/posts/nextOrder?theme=1");
+    const { nextOrder } = await res.json();
+
     const newBlock = {
       id: Date.now(),
       type,
       content: "",
       output: "",
-      order: blocks.length + 1, // ← 固定の順序番号
+      order: nextOrder,
     };
     setBlocks((prev) => [...prev, newBlock]);
   };
 
-  /** 入力変更（stateのみ変更） */
+  // ================================
+  // 入力内容更新
+  // ================================
   const updateBlock = (id, newContent) => {
     setBlocks((prev) =>
       prev.map((b) => (b.id === id ? { ...b, content: newContent } : b))
     );
   };
 
-  /** コード実行（eval）＋DB保存 */
+  // ================================
+  // コード実行・getPost対応
+  // ================================
   const runCode = async (id) => {
     const block = blocks.find((b) => b.id === id);
     if (!block) return;
 
+    const code = block.content.trim();
     let outputText = "";
-    try {
-      const result = eval(block.content);
-      outputText = String(result ?? "");
-    } catch (err) {
-      outputText = "⚠️ エラー: " + err.message;
+
+    // --- getPost(n) の判定 ---
+    const getPostMatch = code.match(/^getPost\((\d+)\)$/);
+    if (getPostMatch) {
+      const n = parseInt(getPostMatch[1], 10);
+      try {
+        const res = await fetch(`http://localhost:3001/posts/history?n=${n}&theme=1`);
+        if (!res.ok) throw new Error("履歴の取得に失敗しました。");
+        const data = await res.json();
+
+        // CSV整形
+        const headers = ["id", "order", "theme", "user", "createdAt", "content"];
+        const row = [
+          data.id,
+          data.order,
+          data.theme,
+          data.user,
+          new Date(data.createdAt).toLocaleString(),
+          JSON.stringify(data.content).replaceAll('"', '""'),
+        ];
+        outputText = headers.join(",") + "\n" + row.join(",");
+
+        // テキストブロックを追加
+        const newTextBlock = {
+          id: Date.now(),
+          type: "text",
+          content: data.content,
+          output: "",
+          order: blocks.length + 1,
+        };
+        setBlocks((prev) => [...prev, newTextBlock]);
+      } catch (err) {
+        outputText = "⚠️ " + err.message;
+      }
+    } else {
+      try {
+        const result = eval(code);
+        outputText = String(result ?? "");
+      } catch (err) {
+        outputText = "⚠️ エラー: " + err.message;
+      }
     }
 
     const updated = { ...block, output: outputText };
     await saveToDatabase(updated);
-
     setBlocks((prev) =>
       prev.map((b) => (b.id === id ? updated : b))
     );
   };
 
-  /** テキストブロックの自動保存（フォーカスが外れた時） */
+  // ================================
+  // テキストブロックの自動保存
+  // ================================
   const handleBlur = async (id) => {
     const block = blocks.find((b) => b.id === id);
     if (!block || block.content.trim() === "") return;
     await saveToDatabase({ ...block, output: "" });
   };
 
-  /** ボタン共通スタイル */
+  // ================================
+  // UI
+  // ================================
   const buttonStyle = {
     border: "none",
     background: "transparent",
@@ -156,7 +204,7 @@ export default function App() {
 
   return (
     <div style={{ fontFamily: "sans-serif" }}>
-      {/* 固定ヘッダー */}
+      {/* ヘッダー */}
       <div
         style={{
           position: "fixed",
@@ -187,7 +235,7 @@ export default function App() {
         </button>
       </div>
 
-      {/* ブロック本体 */}
+      {/* メイン表示 */}
       <div
         style={{
           marginTop: 80,
@@ -212,7 +260,6 @@ export default function App() {
           >
             {block.type === "code" ? (
               <>
-                {/* コード入力と実行ボタン */}
                 <div style={{ display: "flex", alignItems: "flex-start" }}>
                   <button
                     onClick={() => runCode(block.id)}
@@ -244,7 +291,7 @@ export default function App() {
                   />
                 </div>
 
-                {/* 実行結果 */}
+                {/* 実行結果（CSV形式で整列） */}
                 {block.output && (
                   <div
                     style={{
@@ -254,7 +301,7 @@ export default function App() {
                       padding: 8,
                       marginTop: 8,
                       fontFamily: "monospace",
-                      whiteSpace: "pre-wrap",
+                      whiteSpace: "pre",
                       marginLeft: 46,
                       width: "calc(100% - 46px)",
                     }}
@@ -267,7 +314,7 @@ export default function App() {
               <AutoResizeTextarea
                 value={block.content}
                 onChange={(v) => updateBlock(block.id, v)}
-                onBlur={() => handleBlur(block.id)} // ← フォーカス外れたら保存
+                onBlur={() => handleBlur(block.id)}
                 placeholder="ここにテキストを書く..."
                 minRows={1}
                 style={{ fontSize: 15 }}
