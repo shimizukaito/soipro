@@ -1,5 +1,40 @@
 import { useLayoutEffect, useRef, useState, useEffect } from "react";
 
+/** ================================
+ *  ヘルパー：CSVユーティリティ
+ * ================================ */
+function csvEscape(v) {
+  const s = String(v ?? "").replaceAll('"', '""').replaceAll("\n", "\\n");
+  return `"${s}"`;
+}
+function postToCSV(post) {
+  const headers = ["id", "order", "theme", "user", "createdAt", "content"];
+  const row = [
+    post.id,
+    post.order,
+    post.theme,
+    post.user,
+    new Date(post.createdAt).toISOString(),
+    typeof post.content === "string"
+      ? post.content
+      : JSON.stringify(post.content),
+  ];
+  return headers.join(",") + "\n" + row.map(csvEscape).join(",");
+}
+
+/** ================================
+ *  ヘルパー：トップレベルawait可の評価器
+ * ================================ */
+async function asyncEval(code, context = {}) {
+  const argNames = Object.keys(context);
+  const argValues = Object.values(context);
+  const fn = new Function(
+    ...argNames,
+    `"use strict"; return (async () => { ${code} })();`
+  );
+  return await fn(...argValues);
+}
+
 /** 自動で高さが伸びるTextarea */
 function AutoResizeTextarea({
   value,
@@ -49,12 +84,12 @@ function AutoResizeTextarea({
 export default function App() {
   const [blocks, setBlocks] = useState([]);
 
-  // ================================
-  // DBへ保存
-  // ================================
+  /** ================================
+   * DB保存
+   * ================================ */
   async function saveToDatabase(block) {
     try {
-      await fetch("http://localhost:3001/posts", {
+      const res = await fetch("http://localhost:3001/posts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -65,18 +100,32 @@ export default function App() {
           order: block.order,
         }),
       });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`DB保存に失敗しました: ${res.status} ${text}`);
+      }
     } catch (err) {
       console.error("DB保存エラー:", err);
     }
   }
 
-  // ================================
-  // 初期ロード：テーマ1の最新状態取得
-  // ================================
+  async function getNextOrder(theme = 1) {
+    const res = await fetch(
+      `http://localhost:3001/posts/nextOrder?theme=${theme}`
+    );
+    if (!res.ok) throw new Error("次のorder取得に失敗しました。");
+    const { nextOrder } = await res.json();
+    return nextOrder;
+  }
+
+  /** ================================
+   * 初期ロード
+   * ================================ */
   useEffect(() => {
     async function fetchPosts() {
       try {
         const res = await fetch("http://localhost:3001/posts?theme=1");
+        if (!res.ok) throw new Error("データ取得に失敗しました。");
         const posts = await res.json();
         const sorted = posts.sort((a, b) => a.order - b.order);
         const formatted = sorted.map((p) => ({
@@ -94,103 +143,93 @@ export default function App() {
     fetchPosts();
   }, []);
 
-  // ================================
-  // 新しいブロックを追加
-  // ================================
+  /** ================================
+   * ブロック追加
+   * ================================ */
   const addBlock = async (type) => {
-    const res = await fetch("http://localhost:3001/posts/nextOrder?theme=1");
-    const { nextOrder } = await res.json();
-
-    const newBlock = {
-      id: Date.now(),
-      type,
-      content: "",
-      output: "",
-      order: nextOrder,
-    };
-    setBlocks((prev) => [...prev, newBlock]);
+    try {
+      const nextOrder = await getNextOrder(1);
+      const newBlock = {
+        id: Date.now(),
+        type,
+        content: "",
+        output: "",
+        order: nextOrder,
+      };
+      setBlocks((prev) => [...prev, newBlock]);
+    } catch (err) {
+      console.error(err);
+      alert("ブロックの追加に失敗しました。");
+    }
   };
 
-  // ================================
-  // 入力内容更新
-  // ================================
+  /** ================================
+   * 入力更新
+   * ================================ */
   const updateBlock = (id, newContent) => {
     setBlocks((prev) =>
       prev.map((b) => (b.id === id ? { ...b, content: newContent } : b))
     );
   };
 
-  // ================================
-  // コード実行・getPost対応
-  // ================================
+  /** ================================
+   * コード実行
+   * ================================ */
   const runCode = async (id) => {
     const block = blocks.find((b) => b.id === id);
     if (!block) return;
 
-    const code = block.content.trim();
+    setBlocks((prev) =>
+      prev.map((b) => (b.id === id ? { ...b, __running: true } : b))
+    );
+
     let outputText = "";
 
-    // --- getPost(n) の判定 ---
-    const getPostMatch = code.match(/^getPost\((\d+)\)$/);
-    if (getPostMatch) {
-      const n = parseInt(getPostMatch[1], 10);
-      try {
-        const res = await fetch(`http://localhost:3001/posts/history?n=${n}&theme=1`);
+    const print = (...args) => {
+      outputText += (outputText ? "\n" : "") + args.map(String).join(" ");
+    };
+
+    const context = {
+      getPost: async (n) => {
+        const res = await fetch(
+          `http://localhost:3001/posts/history?n=${n}&theme=1`
+        );
         if (!res.ok) throw new Error("履歴の取得に失敗しました。");
-        const data = await res.json();
+        return await res.json();
+      },
+      toCSV: (post) => postToCSV(post),
+      print,
+    };
 
-        // CSV整形
-        const headers = ["id", "order", "theme", "user", "createdAt", "content"];
-        const row = [
-          data.id,
-          data.order,
-          data.theme,
-          data.user,
-          new Date(data.createdAt).toLocaleString(),
-          JSON.stringify(data.content).replaceAll('"', '""'),
-        ];
-        outputText = headers.join(",") + "\n" + row.join(",");
-
-        // テキストブロックを追加
-        const newTextBlock = {
-          id: Date.now(),
-          type: "text",
-          content: data.content,
-          output: "",
-          order: blocks.length + 1,
-        };
-        setBlocks((prev) => [...prev, newTextBlock]);
-      } catch (err) {
-        outputText = "⚠️ " + err.message;
+    try {
+      const result = await asyncEval(block.content.trim(), context);
+      if (result !== undefined) {
+        outputText += (outputText ? "\n" : "") + String(result);
       }
-    } else {
-      try {
-        const result = eval(code);
-        outputText = String(result ?? "");
-      } catch (err) {
-        outputText = "⚠️ エラー: " + err.message;
-      }
+    } catch (err) {
+      outputText = "⚠️ エラー: " + err.message;
     }
 
-    const updated = { ...block, output: outputText };
-    await saveToDatabase(updated);
-    setBlocks((prev) =>
-      prev.map((b) => (b.id === id ? updated : b))
-    );
+    const updated = { ...block, output: outputText, __running: false };
+
+    try {
+      await saveToDatabase(updated);
+    } catch {}
+
+    setBlocks((prev) => prev.map((b) => (b.id === id ? updated : b)));
   };
 
-  // ================================
-  // テキストブロックの自動保存
-  // ================================
+  /** ================================
+   * テキスト自動保存
+   * ================================ */
   const handleBlur = async (id) => {
     const block = blocks.find((b) => b.id === id);
     if (!block || block.content.trim() === "") return;
-    await saveToDatabase({ ...block, output: "" });
+    try {
+      await saveToDatabase({ ...block, output: "" });
+    } catch {}
   };
 
-  // ================================
-  // UI
-  // ================================
   const buttonStyle = {
     border: "none",
     background: "transparent",
@@ -202,9 +241,21 @@ export default function App() {
     transition: "background 0.2s ease",
   };
 
+  const indexLabelStyle = {
+    flex: "0 0 40px",
+    textAlign: "right",
+    marginRight: 8,
+    color: "#888",
+    fontFamily: "monospace",
+    paddingTop: 6,
+  };
+
+  /** ================================
+   * UI
+   * ================================ */
   return (
     <div style={{ fontFamily: "sans-serif" }}>
-      {/* ヘッダー */}
+      {/* 固定ヘッダー：作業コンテキスト + ブロック追加ボタン */}
       <div
         style={{
           position: "fixed",
@@ -213,113 +264,147 @@ export default function App() {
           right: 0,
           background: "white",
           borderBottom: "1px solid #ddd",
-          padding: "10px 24px",
+          padding: "10px 24px 14px",
           zIndex: 1000,
+          boxSizing: "border-box",
         }}
       >
-        <button
-          onClick={() => addBlock("code")}
-          style={buttonStyle}
-          onMouseOver={(e) => (e.currentTarget.style.background = "#eee")}
-          onMouseOut={(e) => (e.currentTarget.style.background = "transparent")}
-        >
-          ＋ コード
-        </button>
-        <button
-          onClick={() => addBlock("text")}
-          style={buttonStyle}
-          onMouseOver={(e) => (e.currentTarget.style.background = "#eee")}
-          onMouseOut={(e) => (e.currentTarget.style.background = "transparent")}
-        >
-          ＋ テキスト
-        </button>
+        {/* 作業コンテキスト（ボタンの上） */}
+        <div style={{ marginBottom: 10 }}>
+          <h2 style={{ margin: 0, fontSize: 18 }}>テーマの名前
+          </h2>
+          <p style={{ margin: "4px 0 0 0", color: "#666", fontSize: 13 }}>
+            ユーザー：pro助 / テーマID：1
+          </p>
+          {/* 必要に応じてテーマ名・説明・日付などをここに追加 */}
+        </div>
+
+        {/* ボタン行 */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            onClick={() => addBlock("code")}
+            style={buttonStyle}
+            onMouseOver={(e) => (e.currentTarget.style.background = "#eee")}
+            onMouseOut={(e) =>
+              (e.currentTarget.style.background = "transparent")
+            }
+          >
+            ＋ コード
+          </button>
+          <button
+            onClick={() => addBlock("text")}
+            style={buttonStyle}
+            onMouseOver={(e) => (e.currentTarget.style.background = "#eee")}
+            onMouseOut={(e) =>
+              (e.currentTarget.style.background = "transparent")
+            }
+          >
+            ＋ テキスト
+          </button>
+        </div>
       </div>
 
-      {/* メイン表示 */}
+      {/* メイン表示：ヘッダー高さぶん下げる */}
       <div
         style={{
-          marginTop: 80,
+          marginTop: 140, // ヘッダー（コンテキスト＋ボタン）分の高さに合わせて調整
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
         }}
       >
-        {blocks.map((block) => (
+        {blocks.map((block, index) => (
+          // 外側ラッパー：番号 + カードを横並び
           <div
             key={block.id}
             style={{
               width: "80%",
               maxWidth: 900,
-              border: "1px solid #ddd",
-              borderRadius: 6,
-              padding: "8px 10px",
+              display: "flex",
               marginBottom: 16,
-              backgroundColor: block.type === "code" ? "#f8f8f8" : "white",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
             }}
           >
-            {block.type === "code" ? (
-              <>
-                <div style={{ display: "flex", alignItems: "flex-start" }}>
-                  <button
-                    onClick={() => runCode(block.id)}
-                    style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: "50%",
-                      background: "#4CAF50",
-                      border: "none",
-                      color: "white",
-                      fontSize: 18,
-                      cursor: "pointer",
-                      marginRight: 10,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                    title="実行"
-                  >
-                    ▶
-                  </button>
+            {/* 添字番号（カードの“外側左”） */}
+            <div style={indexLabelStyle}>[{index + 1}]</div>
 
-                  <AutoResizeTextarea
-                    value={block.content}
-                    onChange={(v) => updateBlock(block.id, v)}
-                    placeholder="// JavaScriptコードを書いてください"
-                    minRows={1}
-                    mono
-                  />
-                </div>
+            {/* カード本体（枠付き） */}
+            <div
+              style={{
+                flex: 1,
+                border: "1px solid #ddd",
+                borderRadius: 6,
+                padding: "8px 10px",
+                backgroundColor: block.type === "code" ? "#f8f8f8" : "white",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+              }}
+            >
+              {block.type === "code" ? (
+                <>
+                  <div style={{ display: "flex", alignItems: "flex-start" }}>
+                    {/* ▶ 実行ボタン */}
+                    <button
+                      onClick={() => runCode(block.id)}
+                      disabled={!!block.__running}
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: "50%",
+                        background: block.__running ? "#9E9E9E" : "#4CAF50",
+                        border: "none",
+                        color: "white",
+                        fontSize: 18,
+                        cursor: block.__running
+                          ? "not-allowed"
+                          : "pointer",
+                        marginRight: 10,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                      title={block.__running ? "実行中..." : "実行"}
+                    >
+                      ▶
+                    </button>
 
-                {/* 実行結果（CSV形式で整列） */}
-                {block.output && (
-                  <div
-                    style={{
-                      background: "#fff",
-                      border: "1px solid #ccc",
-                      borderRadius: 4,
-                      padding: 8,
-                      marginTop: 8,
-                      fontFamily: "monospace",
-                      whiteSpace: "pre",
-                      marginLeft: 46,
-                      width: "calc(100% - 46px)",
-                    }}
-                  >
-                    {block.output}
+                    {/* コード入力 */}
+                    <AutoResizeTextarea
+                      value={block.content}
+                      onChange={(v) => updateBlock(block.id, v)}
+                      placeholder={`// 例:\n// const p = await getPost(2);\n// print(toCSV(p));\n// return p.content;`}
+                      minRows={1}
+                      mono
+                    />
                   </div>
-                )}
-              </>
-            ) : (
-              <AutoResizeTextarea
-                value={block.content}
-                onChange={(v) => updateBlock(block.id, v)}
-                onBlur={() => handleBlur(block.id)}
-                placeholder="ここにテキストを書く..."
-                minRows={1}
-                style={{ fontSize: 15 }}
-              />
-            )}
+
+                  {/* 実行結果 */}
+                  {block.output && (
+                    <div
+                      style={{
+                        background: "#fff",
+                        border: "1px solid #ccc",
+                        borderRadius: 4,
+                        padding: 8,
+                        marginTop: 8,
+                        fontFamily: "monospace",
+                        whiteSpace: "pre",
+                      }}
+                    >
+                      {block.output}
+                    </div>
+                  )}
+                </>
+              ) : (
+                // テキストブロック
+                <AutoResizeTextarea
+                  value={block.content}
+                  onChange={(v) => updateBlock(block.id, v)}
+                  onBlur={() => handleBlur(block.id)}
+                  placeholder="ここにテキストを書く..."
+                  minRows={1}
+                  style={{ fontSize: 15 }}
+                />
+              )}
+            </div>
           </div>
         ))}
       </div>
