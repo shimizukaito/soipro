@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { PrismaClient } from "@prisma/client";
+import * as theme from "./theme.js";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -72,6 +73,8 @@ app.post("/posts", async (req, res) => {
 
   res.json(post);
 });
+
+theme.init(app,prisma);
 
 // ===========================
 app.listen(3001, () => {
