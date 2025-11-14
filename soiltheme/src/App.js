@@ -4,7 +4,7 @@ function App() {
   const [user] = useState({ id: 1, username: "test" }); // テスト用ユーザー
   const [themes, setThemes] = useState([]);
   const [newTheme, setNewTheme] = useState({ title: "", content: "" });
-  const API_URL = "http://localhost:5000";
+  const API_URL = "http://localhost:3001";
 
   // 全テーマ取得（最新順）
   const fetchThemes = async () => {
