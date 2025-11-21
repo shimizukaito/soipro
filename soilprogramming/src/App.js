@@ -22,6 +22,26 @@ function postToCSV(post) {
   return headers.join(",") + "\n" + row.map(csvEscape).join(",");
 }
 
+function postsToCSV(posts) {
+  const headers = ["id", "order", "theme", "user", "createdAt", "content"];
+
+  const rows = posts.map((post) => {
+    const row = [
+      post.id,
+      post.order,
+      post.theme,
+      post.user,
+      new Date(post.createdAt).toISOString(),
+      typeof post.content === "string"
+        ? post.content
+        : JSON.stringify(post.content),
+    ];
+    return row.map(csvEscape).join(",");
+  });
+
+  return [headers.join(","), ...rows].join("\n");
+}
+
 /** ================================
  *  ヘルパー：トップレベルawait可の評価器
  * ================================ */
@@ -186,20 +206,41 @@ export default function App() {
     let outputText = "";
 
     const print = (...args) => {
-      outputText += (outputText ? "\n" : "") + args.map(String).join(" ");
+      outputText +=
+        (outputText ? "\n" : "") +
+        args
+          .map((v) =>
+            typeof v === "object" ? JSON.stringify(v, null, 2) : String(v)
+          )
+          .join(" ");
     };
 
     const context = {
-      getPost: async (n) => {
-        const res = await fetch(
-          `http://localhost:3001/posts/history?n=${n}&theme=1`
-        );
-        if (!res.ok) throw new Error("履歴の取得に失敗しました。");
-        return await res.json();
-      },
-      toCSV: (post) => postToCSV(post),
-      print,
-    };
+  getPost: async (n) => {
+    const res = await fetch(
+      `http://localhost:3001/posts/history?n=${n}&theme=1`
+    );
+    if (!res.ok) throw new Error("履歴の取得に失敗しました。");
+    return await res.json();
+  },
+
+  post: async (theme) => {
+    const res = await fetch(
+      `http://localhost:3001/posts/byTheme?theme=${theme}`
+    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(
+        `テーマ別postの取得に失敗しました: ${res.status} ${text}`
+      );
+    }
+    return await res.json();
+  },
+
+  toCSV: (post) => postToCSV(post),
+  postsToCSV: (posts) => postsToCSV(posts),
+  print,
+};
 
     try {
       const result = await asyncEval(block.content.trim(), context);
@@ -271,12 +312,10 @@ export default function App() {
       >
         {/* 作業コンテキスト（ボタンの上） */}
         <div style={{ marginBottom: 10 }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>テーマの名前
-          </h2>
+          <h2 style={{ margin: 0, fontSize: 18 }}>テーマの名前</h2>
           <p style={{ margin: "4px 0 0 0", color: "#666", fontSize: 13 }}>
             ユーザー：pro助 / テーマID：1
           </p>
-          {/* 必要に応じてテーマ名・説明・日付などをここに追加 */}
         </div>
 
         {/* ボタン行 */}
@@ -307,14 +346,13 @@ export default function App() {
       {/* メイン表示：ヘッダー高さぶん下げる */}
       <div
         style={{
-          marginTop: 140, // ヘッダー（コンテキスト＋ボタン）分の高さに合わせて調整
+          marginTop: 140,
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
         }}
       >
         {blocks.map((block, index) => (
-          // 外側ラッパー：番号 + カードを横並び
           <div
             key={block.id}
             style={{
@@ -324,10 +362,10 @@ export default function App() {
               marginBottom: 16,
             }}
           >
-            {/* 添字番号（カードの“外側左”） */}
+            {/* 添字番号 */}
             <div style={indexLabelStyle}>[{index + 1}]</div>
 
-            {/* カード本体（枠付き） */}
+            {/* カード本体 */}
             <div
               style={{
                 flex: 1,
