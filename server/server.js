@@ -128,3 +128,17 @@ theme.init(app, prisma);
 app.listen(3001, () => {
   console.log("✅ Server running on http://localhost:3001");
 });
+
+//＝＝＝＝＝＝＝＝＝＝テーマ取得用＝＝＝＝＝＝＝＝＝
+
+app.get("/themes", async (req, res) => {
+  try {
+    const themes = await prisma.theme.findMany({
+      orderBy: { id: "asc" }, // 必要に応じて title などに変更
+    });
+    res.json(themes);
+  } catch (err) {
+    console.error("テーマ一覧取得エラー:", err);
+    res.status(500).json({ message: "テーマ一覧の取得に失敗しました。" });
+  }
+});
