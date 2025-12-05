@@ -28,27 +28,27 @@ app.get("/posts", async (req, res) => {
 });
 
 // ===========================
-// 2️⃣ 履歴データの取得 (getPost(n))
+// 2️⃣ 履歴データの取得（getHistory 用）
+//     GET /posts/history?limit=5&theme=1
 // ===========================
 app.get("/posts/history", async (req, res) => {
-  const n = Number(req.query.n) || 1;
   const themeId = Number(req.query.theme) || 1;
+
+  // 直近 n 件を返す。?limit がなければ ?n を見る（互換用）、なければデフォルト10件
+  const limit = req.query.limit
+    ? Number(req.query.limit)
+    : req.query.n
+    ? Number(req.query.n)
+    : 10;
 
   try {
     const posts = await prisma.post.findMany({
-      where: { theme: themeId, isLatest: false },
-      orderBy: { createdAt: "desc" },
-      skip: n - 1,
-      take: 1,
+      where: { theme: themeId, isLatest: false }, // 履歴のみ
+      orderBy: { createdAt: "desc" },             // 新しい順
+      take: limit,
     });
 
-    if (posts.length === 0) {
-      return res
-        .status(404)
-        .json({ message: `履歴${n}件目は存在しません。` });
-    }
-
-    res.json(posts[0]);
+    res.json(posts); // 配列で返す
   } catch (err) {
     console.error("履歴取得エラー:", err);
     res.status(500).json({ message: "履歴の取得に失敗しました。" });
@@ -75,7 +75,7 @@ app.get("/posts/nextOrder", async (req, res) => {
 });
 
 // ===========================
-// 🔵 追加：テーマごとの全 post を取得
+// 🔵 テーマごとの全 post を取得
 //     GET /posts/byTheme?theme=1
 // ===========================
 app.get("/posts/byTheme", async (req, res) => {
@@ -100,18 +100,25 @@ app.get("/posts/byTheme", async (req, res) => {
 // 4️⃣ 投稿の追加／更新（isLatest対応）
 // ===========================
 app.post("/posts", async (req, res) => {
-  const { content, output, theme, user, order } = req.body;
+  const { content, output, theme: themeId, user, order } = req.body;
 
   try {
     // 同一 theme + order の最新を過去化
     await prisma.post.updateMany({
-      where: { theme, order, isLatest: true },
+      where: { theme: themeId, order, isLatest: true },
       data: { isLatest: false },
     });
 
     // 新規追加（最新バージョン）
     const post = await prisma.post.create({
-      data: { content, output, theme, user, order, isLatest: true },
+      data: {
+        content,
+        output,
+        theme: themeId,
+        user,
+        order,
+        isLatest: true,
+      },
     });
 
     res.json(post);
@@ -121,16 +128,26 @@ app.post("/posts", async (req, res) => {
   }
 });
 
-// 既存の theme 関連初期化
-theme.init(app, prisma);
+app.get("/posts/byOrder", async (req, res) => {
+  const { order, theme } = req.query;
 
-// ===========================
-app.listen(3001, () => {
-  console.log("✅ Server running on http://localhost:3001");
+  if (!order || !theme) {
+    return res.status(400).send("order と theme を指定してください");
+  }
+
+  const post = await prisma.posts.findFirst({
+    where: { order: Number(order), theme: Number(theme) },
+  });
+
+  if (!post) return res.status(404).send("該当する post がありません");
+
+  res.json(post);
 });
 
-//＝＝＝＝＝＝＝＝＝＝テーマ取得用＝＝＝＝＝＝＝＝＝
-
+// ===========================
+// 5️⃣ テーマ一覧取得
+//     GET /themes
+// ===========================
 app.get("/themes", async (req, res) => {
   try {
     const themes = await prisma.theme.findMany({
@@ -141,4 +158,14 @@ app.get("/themes", async (req, res) => {
     console.error("テーマ一覧取得エラー:", err);
     res.status(500).json({ message: "テーマ一覧の取得に失敗しました。" });
   }
+});
+
+// 既存の theme 関連初期化（もし中でルートを追加しているならこのまま）
+theme.init(app, prisma);
+
+// ===========================
+// サーバ起動
+// ===========================
+app.listen(3001, () => {
+  console.log("✅ Server running on http://localhost:3001");
 });
