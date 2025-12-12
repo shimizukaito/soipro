@@ -4,7 +4,7 @@ import './App.css';
 // APIのベースURLは残しておく（後で利用するため）
 const API_BASE_URL = 'http://localhost:3001'; 
 
-// 初期ダミーデータ (再開)
+// 初期ダミーデータ 
 const DUMMY_THEMES = [
   { id: 101, title: '初期テーマ A ', content: null },
   { id: 102, title: '初期テーマ B ', content: JSON.stringify([
@@ -31,14 +31,11 @@ function App() {
   const [loading, setLoading] = useState(false); // ダミーなので常に false
 
   // --- API連携ロジック (モックとしてコメントアウト) ---
-  
   // ダミーデータからテーマ詳細をロードする内部関数
   const loadThemeDataLocally = (themeId) => {
     const theme = themes.find(t => t.id === themeId);
     if (!theme) return;
-
     setThemeTitle(theme.title);
-
     if (theme.content) {
       try {
         const parsedRows = JSON.parse(theme.content);
@@ -51,6 +48,7 @@ function App() {
       setRows([{ ...initialRowData, question: 1 }]);
     }
   };
+
 
   // 1. テーマ一覧取得 (GET /themes) - モック
   const fetchThemes = useCallback(async () => {
@@ -84,7 +82,7 @@ function App() {
         return;
     }
     // setLoading(true); // API通信をコメントアウト
-    /*
+    
     try {
       const response = await fetch(`${API_BASE_URL}/themes/${themeId}`);
       // ... API処理 ...
@@ -93,15 +91,47 @@ function App() {
     } finally {
         setLoading(false);
     }
-    */
-    // ローカルロード処理を呼び出す
+        // ローカルロード処理を呼び出す
     loadThemeDataLocally(themeId);
     setLoading(false);
   }, [themes]); // themes を依存配列に追加
 
 
-  // 3. テーマ全体保存 (PUT /themes/saveThemeData) - モック
-  const handleSave = () => {
+  // 3. 新しくテーマを保存 (PUT /themes/saveThemeData) - モック
+  const handleSave = async() => {    
+    if (selectedThemeId === null) {
+      alert("保存するテーマを選択または作成してください。");
+      return;
+    }
+    // rows（表データ）をJSON文字列に変換
+    const contentJson = JSON.stringify(rows); 
+    try {
+      const response = await fetch(`${API_BASE_URL}/themes/`,{
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: themeTitle,
+          sections : contentJson,
+        }),
+      });
+      // ... API呼び出し PUT /themes/saveThemeData ...
+      if (!response.ok) throw new Error('テーマデータの保存に失敗しました。');
+    } catch (error) {
+      // ... エラー処理 ...
+    }
+    // // ⭐ モック処理: 内部 State (themes) を更新
+    // const updatedThemes = themes.map(t => 
+    //   t.id === selectedThemeId ? { ...t, content: contentJson } : t
+    // );
+    // setThemes(updatedThemes);
+
+    // alert(`テーマ「${themeTitle}」のデータ (JSON形式) を内部で保存しました！`);
+  };
+
+
+ // 3. テーマ内容の保存/更新 (PUT /themes/saveThemeData)
+  // 保存ボタンが押されるたびに実行される関数
+  const handleUpdate = async() => {    
     if (selectedThemeId === null) {
       alert("保存するテーマを選択または作成してください。");
       return;
@@ -110,37 +140,59 @@ function App() {
     // rows（表データ）をJSON文字列に変換
     const contentJson = JSON.stringify(rows); 
     
-    /* try {
-      // ... API呼び出し PUT /themes/saveThemeData ...
-      if (!response.ok) throw new Error('テーマデータの保存に失敗しました。');
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/themes/saveThemeData`,{
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          themeId: selectedThemeId, // 選択中のテーマID
+          contentJson: contentJson, // 保存する内容（JSON文字列）
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`テーマデータの保存に失敗しました: ${response.statusText}`);
+      }
+      
+      alert(`テーマ「${themeTitle}」の内容を保存しました！`);
     } catch (error) {
-      // ... エラー処理 ...
+      console.error('テーマデータ保存エラー:', error);
+      alert('テーマ内容の保存に失敗しました。');
+    } finally {
+      setLoading(false);
     }
-    */
-
-    // ⭐ モック処理: 内部 State (themes) を更新
-    const updatedThemes = themes.map(t => 
-      t.id === selectedThemeId ? { ...t, content: contentJson } : t
-    );
-    setThemes(updatedThemes);
-
-    alert(`テーマ「${themeTitle}」のデータ (JSON形式) を内部で保存しました！`);
   };
 
+
   // 4. 新規テーマ作成 (POST /themes) - モック
-  const handleCreateNewTheme = () => {
+  const handleCreateNewTheme = async() => {
       const title = prompt("新しいテーマのタイトルを入力してください:");
       if (!title || title.trim() === "") return;
       
       const newThemeId = Math.max(...themes.map(t => t.id)) + 1; // 新しいIDを生成
       const newTheme = { id: newThemeId, title: title, content: null };
 
-      /* try {
-          // ... API呼び出し POST /themes ...
+      const contentJson = JSON.stringify(rows); 
+      try {
+        const response = await fetch(`${API_BASE_URL}/themes/`,{
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: themeTitle,
+            sections : contentJson,
+          }),
+        });
+        if (!response.ok) throw new Error('テーマデータの保存に失敗しました。');
       } catch (error) {
-          // ... エラー処理 ...
+        // ... エラー処理 ...
       }
-      */
+      
+
+
+
+
+
       
       // ⭐ モック処理: 内部 State (themes) を更新
       setThemes([...themes, newTheme]);

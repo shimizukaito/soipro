@@ -44,9 +44,7 @@ model Theme {
   title       String
   description String   @default("")   // 旧contentの役割
   sections    Json     @default("[]") // JSON配列を想定（セクション配列）
-
   createdAt   DateTime @default(now())
-
   user        User?    @relation(fields: [userId], references: [id])
   userId      Int?
 }

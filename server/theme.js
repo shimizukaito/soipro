@@ -8,7 +8,7 @@ export function init(app, prisma) {
   app.post("/themes", async (req, res) => {
       const { title } = req.body;
       const userId = 1; // 認証なしのため固定値
-
+      console.log(title)
       try {
           const theme = await prisma.theme.create({
               data: { 
@@ -38,7 +38,7 @@ export function init(app, prisma) {
           const updatedTheme = await prisma.theme.update({
               where: { id: themeId },
               data: { 
-                  content: contentJson, // JSON文字列を Theme.content に保存
+                  sections: contentJson, // JSON文字列を Theme.content に保存
               },
           });
           res.json(updatedTheme); 
