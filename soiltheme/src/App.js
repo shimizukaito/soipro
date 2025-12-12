@@ -1,76 +1,88 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import Login from './components/Login';
+import Dashboard from './components/Dashboard';
+import CreateTheme from './components/CreateTheme';
+
+// ログイン状態に応じてアクセスを制御するコンポーネント
+const ProtectedRoute = ({ children, authToken }) => {
+  if (!authToken) {
+    // トークンがなければログインページへ強制リダイレクト
+    return <Navigate to="/login" replace />;
+  }
+  return children; // トークンがあれば、要求されたコンポーネントを表示
+};
 
 function App() {
-  const [user] = useState({ id: 1, username: "test" }); // テスト用ユーザー
-  const [themes, setThemes] = useState([]);
-  const [newTheme, setNewTheme] = useState({ title: "", content: "" });
-  const API_URL = "http://localhost:3001";
+  // トークンとユーザ名をlocalStorageから初期ロード
+  const [authToken, setAuthToken] = useState(localStorage.getItem('authToken'));
+  const [username, setUsername] = useState(localStorage.getItem('username') || '');
 
-  // 全テーマ取得（最新順）
-  const fetchThemes = async () => {
-    try {
-      const res = await fetch(`${API_URL}/themes`);
-      const data = await res.json();
-      // 作成日時で降順ソート
-      const sorted = data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-      setThemes(sorted);
-    } catch (err) {
-      console.error("Fetch failed:", err);
-    }
+  // 状態変更の監視ログ（デバッグ用）
+  useEffect(() => {
+    console.log('🔄 App.js state changed: authToken is now:', authToken ? 'set' : 'null');
+  }, [authToken]);
+
+
+  // ログアウト処理
+  const handleLogout = () => {
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('username');
+    setAuthToken(null);
+    setUsername('');
   };
-
-  const handleCreateTheme = async () => {
-    if (!newTheme.title || !newTheme.content) return alert("タイトルと内容を入力してください");
-
-    try {
-      const res = await fetch(`${API_URL}/themes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...newTheme, userId: user.id }),
-      });
-      const data = await res.json();
-      setThemes((prev) => [data, ...prev]); // 最新テーマを上に追加
-      setNewTheme({ title: "", content: "" });
-    } catch (err) {
-      console.error("Create failed:", err);
-    }
-  };
-
-  useEffect(() => { fetchThemes(); }, []);
-
-  // ユーザー自身のテーマだけフィルタ
-  const myThemes = themes.filter(t => t.userId === user.id);
 
   return (
-    <div style={{ padding: 20 }}>
-      <h2>こんにちは、{user.username} さん (テスト用)</h2>
+    <Router>
+      <header>
+        <nav style={{ padding: '10px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between' }}>
+          {authToken && username && <span>ようこそ, **{username}** さん | </span>}
+          {authToken ? (
+            <button onClick={handleLogout} style={{ marginLeft: 'auto' }}>ログアウト</button>
+          ) : (
+            <span>未ログイン</span>
+          )}
+        </nav>
+      </header>
+      <main style={{ padding: '20px' }}>
+        <Routes>
+          {/* ログインページ */}
+          <Route 
+            path="/login" 
+            element={authToken 
+              // ログイン済みならダッシュボードへリダイレクト
+              ? <Navigate to="/dashboard" replace /> 
+              // 未ログインならLoginコンポーネントを表示
+              : <Login setAuthToken={setAuthToken} setUsername={setUsername} />} 
+          />
+          
+          {/* 保護されたルート（ダッシュボード） */}
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute authToken={authToken}>
+                <Dashboard username={username} /> 
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* 保護されたルート（テーマ作成画面） */}
+          <Route
+            path="/create-theme"
+            element={
+              <ProtectedRoute authToken={authToken}>
+                <CreateTheme />
+              </ProtectedRoute>
+            }
+          />
 
-      <h3>テーマ作成</h3>
-      <input
-        placeholder="タイトル"
-        value={newTheme.title}
-        onChange={(e) => setNewTheme({ ...newTheme, title: e.target.value })}
-      /><br/>
-      <textarea
-        placeholder="内容"
-        value={newTheme.content}
-        onChange={(e) => setNewTheme({ ...newTheme, content: e.target.value })}
-      ></textarea><br/>
-      <button onClick={handleCreateTheme}>作成</button>
-
-      <h3>あなたのテーマ一覧（最新順）</h3>
-      {myThemes.length === 0 ? (
-        <p>まだテーマがありません</p>
-      ) : (
-        myThemes.map((t) => (
-          <div key={t.id} style={{ border: "1px solid #ccc", margin: 8, padding: 8 }}>
-            <strong>{t.title}</strong> — {t.user?.username || "匿名"}<br/>
-            <small>{new Date(t.createdAt).toLocaleString()}</small>
-            <p>{t.content}</p>
-          </div>
-        ))
-      )}
-    </div>
+          {/* ルートURLアクセス時のデフォルトリダイレクト */}
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          
+          <Route path="*" element={<h1>404 Not Found</h1>} />
+        </Routes>
+      </main>
+    </Router>
   );
 }
 

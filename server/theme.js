@@ -9,15 +9,43 @@ export function init(app, prisma) {
         res.status(400).json({ error: "ユーザー名が既に存在します" });
         }
     });
-    // ログイン
-app.post("/login", async (req, res) => {
+    /* --------------------------------------------------
+  ② ログイン（JWT 発行）
+  エンドポイント: POST /api/login  👈 パスを修正
+-------------------------------------------------- */
+app.post("/api/login", async (req, res) => {
+  try {
     const { username, password } = req.body;
-    const user = await prisma.user.findUnique({ where: { username } });
-    if (!user || user.password !== password) {
-      return res.status(401).json({ error: "認証失敗" });
+    console.log("Login request:", req.body);
+
+    // ユーザー名でユーザーを検索
+    const user = await prisma.user.findUnique({
+      where: { username },
+    });
+
+    if (!user) {
+      console.log("User not found");
+      return res.status(401).json({ error: "Invalid login" });
     }
-    res.json({ message: "ログイン成功", user });
-  });
+
+    // パスワードの比較
+    const ok = await bcrypt.compare(password, user.password);
+    console.log("Password match:", ok);
+
+    if (!ok) {
+      return res.status(401).json({ error: "Invalid login" });
+    }
+
+    // JWTを発行
+    const token = jwt.sign({ userId: user.id }, SECRET, { expiresIn: '1h' }); 
+    console.log("JWT issued for userId:", user.id);
+
+    res.json({ token, username: user.username });
+  } catch (err) {
+    console.error("Login error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
   
   // テーマ作成
   app.post("/themes", async (req, res) => {
