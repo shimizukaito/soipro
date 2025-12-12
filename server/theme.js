@@ -58,7 +58,7 @@ export function init(app, prisma) {
       try {
           const theme = await prisma.theme.findUnique({
               where: { id: themeId },
-              select: { id: true, title: true, content: true }, 
+              select: { id: true, title: true, sections: true }, 
           });
 
           if (!theme) {
