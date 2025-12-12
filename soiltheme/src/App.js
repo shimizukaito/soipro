@@ -103,7 +103,7 @@ function App() {
     }
     
     // rows（表データ：配列）をJSON文字列に変換し、contentJsonとして送信する
-    const contentJson = JSON.stringify(rows); 
+    const contentJson = rows; 
     
     setLoading(true);
     try {
