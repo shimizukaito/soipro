@@ -11,6 +11,7 @@ app.use(express.json());
 
 // ===========================
 // 1️⃣ 最新データの取得（isLatest = true）
+//     GET /posts?theme=1
 // ===========================
 app.get("/posts", async (req, res) => {
   const themeId = Number(req.query.theme) || 1;
@@ -28,13 +29,12 @@ app.get("/posts", async (req, res) => {
 });
 
 // ===========================
-// 2️⃣ 履歴データの取得（getHistory 用）
+// 2️⃣ 履歴データの取得（isLatest = false）
 //     GET /posts/history?limit=5&theme=1
 // ===========================
 app.get("/posts/history", async (req, res) => {
   const themeId = Number(req.query.theme) || 1;
 
-  // 直近 n 件を返す。?limit がなければ ?n を見る（互換用）、なければデフォルト10件
   const limit = req.query.limit
     ? Number(req.query.limit)
     : req.query.n
@@ -43,12 +43,12 @@ app.get("/posts/history", async (req, res) => {
 
   try {
     const posts = await prisma.post.findMany({
-      where: { theme: themeId, isLatest: false }, // 履歴のみ
-      orderBy: { createdAt: "desc" },             // 新しい順
+      where: { theme: themeId, isLatest: false },
+      orderBy: { createdAt: "desc" },
       take: limit,
     });
 
-    res.json(posts); // 配列で返す
+    res.json(posts);
   } catch (err) {
     console.error("履歴取得エラー:", err);
     res.status(500).json({ message: "履歴の取得に失敗しました。" });
@@ -57,6 +57,7 @@ app.get("/posts/history", async (req, res) => {
 
 // ===========================
 // 3️⃣ 次に使える order 番号を取得
+//     GET /posts/nextOrder?theme=1
 // ===========================
 app.get("/posts/nextOrder", async (req, res) => {
   const themeId = Number(req.query.theme) || 1;
@@ -84,20 +85,22 @@ app.get("/posts/byTheme", async (req, res) => {
 
   try {
     const posts = await prisma.post.findMany({
-      where: { theme: themeId },       // isLatest 条件なしで全部
-      orderBy: { createdAt: "desc" },  // 必要なら order に変更OK
+      where: { theme: themeId },
+      orderBy: { createdAt: "desc" },
     });
     res.json(posts);
   } catch (err) {
     console.error("テーマ別post取得エラー:", err);
-    res
-      .status(500)
-      .json({ message: "テーマ別postの取得に失敗しました。", detail: String(err) });
+    res.status(500).json({
+      message: "テーマ別postの取得に失敗しました。",
+      detail: String(err),
+    });
   }
 });
 
 // ===========================
 // 4️⃣ 投稿の追加／更新（isLatest対応）
+//     POST /posts
 // ===========================
 app.post("/posts", async (req, res) => {
   const { content, output, theme: themeId, user, order } = req.body;
@@ -128,22 +131,6 @@ app.post("/posts", async (req, res) => {
   }
 });
 
-app.get("/posts/byOrder", async (req, res) => {
-  const { order, theme } = req.query;
-
-  if (!order || !theme) {
-    return res.status(400).send("order と theme を指定してください");
-  }
-
-  const post = await prisma.posts.findFirst({
-    where: { order: Number(order), theme: Number(theme) },
-  });
-
-  if (!post) return res.status(404).send("該当する post がありません");
-
-  res.json(post);
-});
-
 // ===========================
 // 5️⃣ テーマ一覧取得
 //     GET /themes
@@ -151,7 +138,8 @@ app.get("/posts/byOrder", async (req, res) => {
 app.get("/themes", async (req, res) => {
   try {
     const themes = await prisma.theme.findMany({
-      orderBy: { id: "asc" }, // 必要に応じて title などに変更
+      orderBy: { id: "asc" },
+      // sections も一緒に返る（Jsonカラムならそのまま返る）
     });
     res.json(themes);
   } catch (err) {
@@ -160,7 +148,25 @@ app.get("/themes", async (req, res) => {
   }
 });
 
-// 既存の theme 関連初期化（もし中でルートを追加しているならこのまま）
+// ===========================
+// ✅ 追加：テーマ1件取得（question表示に必要）
+//     GET /themes/:id
+// ===========================
+app.get("/themes/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) return res.status(400).json({ message: "invalid id" });
+
+  try {
+    const t = await prisma.theme.findUnique({ where: { id } });
+    if (!t) return res.status(404).json({ message: "theme not found" });
+    res.json(t);
+  } catch (err) {
+    console.error("テーマ詳細取得エラー:", err);
+    res.status(500).json({ message: "テーマ詳細の取得に失敗しました。" });
+  }
+});
+
+// 既存の theme 関連初期化（中でルートを追加しているならこのまま）
 theme.init(app, prisma);
 
 // ===========================

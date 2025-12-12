@@ -1,7 +1,5 @@
 import { useLayoutEffect, useRef, useState, useEffect } from "react";
 
-// 設定した説明文が最初に出て、次のセクションへ移動するボタンを押すとセクションが進むようにする。
-
 /** ================================
  *  ヘルパー：CSVユーティリティ
  * ================================ */
@@ -17,16 +15,12 @@ function postToCSV(post) {
     post.theme,
     post.user,
     new Date(post.createdAt).toISOString(),
-    typeof post.content === "string"
-      ? post.content
-      : JSON.stringify(post.content),
+    typeof post.content === "string" ? post.content : JSON.stringify(post.content),
   ];
   return headers.join(",") + "\n" + row.map(csvEscape).join(",");
 }
-
 function postsToCSV(posts) {
   const headers = ["id", "order", "theme", "user", "createdAt", "content"];
-
   const rows = posts.map((post) => {
     const row = [
       post.id,
@@ -34,13 +28,10 @@ function postsToCSV(posts) {
       post.theme,
       post.user,
       new Date(post.createdAt).toISOString(),
-      typeof post.content === "string"
-        ? post.content
-        : JSON.stringify(post.content),
+      typeof post.content === "string" ? post.content : JSON.stringify(post.content),
     ];
     return row.map(csvEscape).join(",");
   });
-
   return [headers.join(","), ...rows].join("\n");
 }
 
@@ -66,6 +57,7 @@ function AutoResizeTextarea({
   minRows = 1,
   style,
   mono = false,
+  readOnly = false,
 }) {
   const ref = useRef(null);
 
@@ -95,7 +87,8 @@ function AutoResizeTextarea({
       ref={ref}
       rows={minRows}
       value={value}
-      onChange={(e) => onChange(e.target.value)}
+      readOnly={readOnly}
+      onChange={(e) => onChange?.(e.target.value)}
       onBlur={onBlur}
       placeholder={placeholder}
       style={baseStyle}
@@ -104,17 +97,24 @@ function AutoResizeTextarea({
 }
 
 export default function App() {
+  const API_BASE = "http://localhost:3001";
+
   const [blocks, setBlocks] = useState([]);
 
   const [themes, setThemes] = useState([]);
-  const [currentTheme, setCurrentTheme] = useState(1); // 今選択しているテーマID
+  const [currentTheme, setCurrentTheme] = useState(1); // 現在選択中テーマID
+
+  // ✅ 教材 questions を保持（theme.sections から作る）
+  const [questions, setQuestions] = useState([]);
+  // ✅ 次に追加する question 番号
+  const [nextQuestionNum, setNextQuestionNum] = useState(1);
 
   /** ================================
    * DB保存
    * ================================ */
   async function saveToDatabase(block) {
     try {
-      const res = await fetch("http://localhost:3001/posts", {
+      const res = await fetch(`${API_BASE}/posts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -135,26 +135,24 @@ export default function App() {
   }
 
   async function getNextOrder(theme) {
-    const res = await fetch(
-      `http://localhost:3001/posts/nextOrder?theme=${theme}`
-    );
+    const res = await fetch(`${API_BASE}/posts/nextOrder?theme=${theme}`);
     if (!res.ok) throw new Error("次のorder取得に失敗しました。");
     const { nextOrder } = await res.json();
     return nextOrder;
   }
 
   /** ================================
-   * テーマ一覧の初期ロード
+   * テーマ一覧 初期ロード
    * ================================ */
   useEffect(() => {
     async function fetchThemes() {
       try {
-        const res = await fetch("http://localhost:3001/themes");
+        const res = await fetch(`${API_BASE}/themes`);
         if (!res.ok) throw new Error("テーマ一覧の取得に失敗しました。");
         const data = await res.json();
         setThemes(data);
 
-        // currentTheme が存在しないときは先頭テーマを選ぶ
+        // currentTheme が存在しないときは先頭テーマ
         if (data.length > 0 && !data.find((t) => t.id === currentTheme)) {
           setCurrentTheme(data[0].id);
         }
@@ -163,17 +161,16 @@ export default function App() {
       }
     }
     fetchThemes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /** ================================
-   * 投稿の初期ロード＆テーマ切り替え時のロード
+   * 投稿ロード（テーマ切替時）
    * ================================ */
   useEffect(() => {
     async function fetchPosts() {
       try {
-        const res = await fetch(
-          `http://localhost:3001/posts?theme=${currentTheme}`
-        );
+        const res = await fetch(`${API_BASE}/posts?theme=${currentTheme}`);
         if (!res.ok) throw new Error("データ取得に失敗しました。");
         const posts = await res.json();
         const sorted = posts.sort((a, b) => a.order - b.order);
@@ -194,13 +191,54 @@ export default function App() {
   }, [currentTheme]);
 
   /** ================================
-   * ブロック追加
+   * ✅ theme.sections から questions を読み込む
+   * - sections が「質問配列そのもの」でもOK
+   * - sections が { questions:[...] } の配列でもOK
+   * ================================ */
+  useEffect(() => {
+    async function fetchQuestions() {
+      try {
+        const res = await fetch(`${API_BASE}/themes/${currentTheme}`);
+        if (!res.ok) throw new Error("テーマ詳細の取得に失敗しました。");
+        const theme = await res.json();
+
+        const sections = theme.sections ?? [];
+
+        // デバッグ（必要なら残してOK）
+        console.log("theme.sections =", sections);
+
+        const allQuestions = Array.isArray(sections)
+          ? sections.flatMap((s) => {
+              // sections が質問配列そのもの： {question,text,...}
+              if (s && s.question !== undefined) return [s];
+              // sections が { questions:[...] } の配列
+              if (s && Array.isArray(s.questions)) return s.questions;
+              return [];
+            })
+          : [];
+
+        allQuestions.sort((a, b) => Number(a.question) - Number(b.question));
+
+        setQuestions(allQuestions);
+        setNextQuestionNum(1); // テーマ切替時は最初から（必要なら後で復元も可）
+      } catch (err) {
+        console.error("質問ロード失敗:", err);
+        setQuestions([]);
+        setNextQuestionNum(1);
+      }
+    }
+
+    fetchQuestions();
+  }, [currentTheme]);
+
+  /** ================================
+   * ブロック追加（手動）
    * ================================ */
   const addBlock = async (type) => {
     try {
       const nextOrder = await getNextOrder(currentTheme);
       const newBlock = {
-        id: Date.now(),
+        id: `tmp-${Date.now()}`,
         type,
         content: "",
         output: "",
@@ -211,6 +249,45 @@ export default function App() {
     } catch (err) {
       console.error(err);
       alert("ブロックの追加に失敗しました。");
+    }
+  };
+
+  /** ================================
+   * ✅ 次のセクションへ（＝次の question を text ブロックとして追加）
+   * ================================ */
+  const addNextQuestionBlock = async () => {
+    const q = questions.find(
+      (x) => Number(x?.question) === Number(nextQuestionNum)
+    );
+
+    if (!q) {
+      alert("次のセクションが見つかりません");
+      return;
+    }
+
+    try {
+      const nextOrder = await getNextOrder(currentTheme);
+
+      const newBlock = {
+        id: `q-${currentTheme}-${nextOrder}-${Date.now()}`,
+        type: "text",
+        content: q.text ?? "",
+        output: "",
+        order: nextOrder,
+        theme: currentTheme,
+      };
+
+      // 画面に追加
+      setBlocks((prev) => [...prev, newBlock]);
+
+      // DBに保存（テキストなので output 空）
+      await saveToDatabase({ ...newBlock, output: "" });
+
+      // 次の問題番号へ
+      setNextQuestionNum((n) => n + 1);
+    } catch (err) {
+      console.error(err);
+      alert("クエッションブロックの追加に失敗しました。");
     }
   };
 
@@ -226,111 +303,86 @@ export default function App() {
   /** ================================
    * コード実行
    * ================================ */
-
-  // 取ってきたポストを使って違うプログラムを動かせるようにしたい
-  //  ブロックの実行結果を異なるブロックでも動かせるようにしたい
   const runCode = async (id) => {
-  const block = blocks.find((b) => b.id === id);
-  if (!block) return;
+    const block = blocks.find((b) => b.id === id);
+    if (!block) return;
 
-  // 実行中フラグON
-  setBlocks((prev) =>
-    prev.map((b) => (b.id === id ? { ...b, __running: true } : b))
-  );
+    // 実行中フラグON
+    setBlocks((prev) =>
+      prev.map((b) => (b.id === id ? { ...b, __running: true } : b))
+    );
 
-  let outputText = "";
+    let outputText = "";
 
-  const print = (...args) => {
-    outputText +=
-      (outputText ? "\n" : "") +
-      args
-        .map((v) =>
-          typeof v === "object" ? JSON.stringify(v, null, 2) : String(v)
-        )
-        .join(" ");
-  };
+    const print = (...args) => {
+      outputText +=
+        (outputText ? "\n" : "") +
+        args
+          .map((v) =>
+            typeof v === "object" ? JSON.stringify(v, null, 2) : String(v)
+          )
+          .join(" ");
+    };
 
-  // options = { limit, theme } を受け取る形にする
-  const getPosts = async (options = {}) => {
-  const {
-    limit = 10,
-    theme = currentTheme,
-    output, // order番号（任意）
-  } = options;
+    // options = { limit, theme, output(order) }
+    const getPosts = async (options = {}) => {
+      const { limit = 10, theme = currentTheme, output } = options;
 
-  const params = new URLSearchParams();
-  params.set("limit", String(limit));
-  params.set("theme", String(theme));
+      const params = new URLSearchParams();
+      params.set("limit", String(limit));
+      params.set("theme", String(theme));
 
-  const res = await fetch(
-    `http://localhost:3001/posts/history?${params.toString()}`
-  );
+      const res = await fetch(`${API_BASE}/posts/history?${params.toString()}`);
+      if (!res.ok) throw new Error("履歴の取得に失敗しました。");
 
-  if (!res.ok) throw new Error("履歴の取得に失敗しました。");
+      const posts = await res.json();
 
-  // 常に配列
-  const posts = await res.json();
-
-  // output 指定があればフィルタ（order が一致するもののみ）
-  if (output !== undefined && output !== null) {
-    const orderNum = Number(output);
-    if (Number.isNaN(orderNum)) {
-      throw new Error("output には order 番号（数値）を指定してください。");
-    }
-
-    // 指定 order の投稿を抽出
-    const matched = posts.filter((p) => p.order === orderNum);
-
-    // 🔥 出力だけを返す（常に配列）
-    return matched.map((p) => ({ output: p.output }));
-  }
-
-  // output 指定なし → 全件返す
-  return posts;
-};
-
-
-  const context = {
-    // 新しい履歴取得関数
-    getPosts,
-
-    // 既存: テーマごとの全ポスト
-    post: async (theme) => {
-      const res = await fetch(
-        `http://localhost:3001/posts/byTheme?theme=${theme}`
-      );
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(
-          `テーマ別postの取得に失敗しました: ${res.status} ${text}`
-        );
+      if (output !== undefined && output !== null) {
+        const orderNum = Number(output);
+        if (Number.isNaN(orderNum)) {
+          throw new Error("output には order 番号（数値）を指定してください。");
+        }
+        const matched = posts.filter((p) => p.order === orderNum);
+        return matched.map((p) => ({ output: p.output }));
       }
-      return await res.json();
-    },
 
-    toCSV: (post) => postToCSV(post),
-    postsToCSV: (posts) => postsToCSV(posts),
-    print,
-  };
+      return posts;
+    };
 
-  try {
-    const result = await asyncEval(block.content.trim(), context);
-    if (result !== undefined) {
-      outputText += (outputText ? "\n" : "") + String(result);
+    const context = {
+      getPosts,
+      post: async (theme) => {
+        const res = await fetch(`${API_BASE}/posts/byTheme?theme=${theme}`);
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(
+            `テーマ別postの取得に失敗しました: ${res.status} ${text}`
+          );
+        }
+        return await res.json();
+      },
+      toCSV: (post) => postToCSV(post),
+      postsToCSV: (posts) => postsToCSV(posts),
+      print,
+    };
+
+    try {
+      const result = await asyncEval(block.content.trim(), context);
+      if (result !== undefined) {
+        outputText += (outputText ? "\n" : "") + String(result);
+      }
+    } catch (err) {
+      outputText = "⚠️ エラー: " + err.message;
     }
-  } catch (err) {
-    outputText = "⚠️ エラー: " + err.message;
-  }
 
-  const updated = { ...block, output: outputText, __running: false };
+    const updated = { ...block, output: outputText, __running: false };
 
-  try {
-    await saveToDatabase(updated);
-  } catch {}
+    try {
+      await saveToDatabase(updated);
+    } catch {}
 
-  setBlocks((prev) => prev.map((b) => (b.id === id ? updated : b)));
-};
-
+    setBlocks((prev) => prev.map((b) => (b.id === id ? updated : b)));
+  };
 
   /** ================================
    * テキスト自動保存
@@ -340,7 +392,7 @@ export default function App() {
     if (!block || block.content.trim() === "") return;
     try {
       await saveToDatabase({ ...block, output: "" });
-    } catch { }
+    } catch {}
   };
 
   const buttonStyle = {
@@ -363,38 +415,14 @@ export default function App() {
     paddingTop: 6,
   };
 
-  // ================================
-  // テーマ一覧の初期ロード
-  // ================================
-  useEffect(() => {
-    async function fetchThemes() {
-      try {
-        const res = await fetch("http://localhost:3001/themes");
-        if (!res.ok) throw new Error("テーマ一覧の取得に失敗しました。");
-        const data = await res.json();
-        setThemes(data);
-
-        // もし currentTheme が存在しない場合、先頭をデフォにする
-        if (data.length > 0 && !data.find((t) => t.id === currentTheme)) {
-          setCurrentTheme(data[0].id);
-        }
-      } catch (err) {
-        console.error(err);
-      }
-    }
-    fetchThemes();
-  }, []); // 初回だけ
+  const currentThemeObj = themes.find((t) => t.id === currentTheme);
 
   /** ================================
    * UI
    * ================================ */
   return (
-    <div
-      style={{
-        fontFamily: "sans-serif",
-      }}
-    >
-      {/* 固定ヘッダー：作業コンテキスト + ブロック追加ボタン */}
+    <div style={{ fontFamily: "sans-serif" }}>
+      {/* 固定ヘッダー */}
       <div
         style={{
           position: "fixed",
@@ -408,10 +436,10 @@ export default function App() {
           boxSizing: "border-box",
         }}
       >
-        {/* 作業コンテキスト（ボタンの上） */}
+        {/* 作業コンテキスト */}
         <div style={{ marginBottom: 10 }}>
           <h2 style={{ margin: 0, fontSize: 18 }}>
-            {currentTheme ? currentTheme.title : "テーマの名前"}
+            {currentThemeObj?.title ?? "テーマの名前"}
           </h2>
           <p style={{ margin: "4px 0 0 0", color: "#666", fontSize: 13 }}>
             ユーザー：pro助 / テーマID：{currentTheme}
@@ -420,6 +448,18 @@ export default function App() {
 
         {/* ボタン行 */}
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {/* ✅ 追加：次のセクションへ */}
+          <button
+            onClick={addNextQuestionBlock}
+            style={buttonStyle}
+            onMouseOver={(e) => (e.currentTarget.style.background = "#eee")}
+            onMouseOut={(e) =>
+              (e.currentTarget.style.background = "transparent")
+            }
+          >
+            次のセクションへ
+          </button>
+
           <button
             onClick={() => addBlock("code")}
             style={buttonStyle}
@@ -430,6 +470,7 @@ export default function App() {
           >
             ＋ コード
           </button>
+
           <button
             onClick={() => addBlock("text")}
             style={buttonStyle}
@@ -443,15 +484,15 @@ export default function App() {
         </div>
       </div>
 
-      {/* 👇 ヘッダーの下を2カラムレイアウトにする */}
+      {/* 2カラム */}
       <div
         style={{
-          marginTop: 140, // ヘッダー分下げる
+          marginTop: 140,
           display: "flex",
-          height: "calc(100vh - 140px)", // 画面下まで使うなら
+          height: "calc(100vh - 140px)",
         }}
       >
-        {/* ← 左サイドバー（テーマ一覧） */}
+        {/* 左サイドバー（テーマ一覧） */}
         <div
           style={{
             width: 260,
@@ -491,7 +532,7 @@ export default function App() {
           </ul>
         </div>
 
-        {/* → 右メインエリア（今までの blocks 一覧） */}
+        {/* 右メインエリア（blocks） */}
         <div
           style={{
             flex: 1,
@@ -502,25 +543,18 @@ export default function App() {
         >
           <div style={{ width: "80%", maxWidth: 900, padding: "0 0 32px" }}>
             {blocks.map((block, index) => (
-              <div
-                key={block.id}
-                style={{
-                  display: "flex",
-                  marginBottom: 16,
-                }}
-              >
+              <div key={block.id} style={{ display: "flex", marginBottom: 16 }}>
                 {/* 添字番号 */}
                 <div style={indexLabelStyle}>[{index + 1}]</div>
 
-                {/* カード本体（ここは元のまま） */}
+                {/* カード本体 */}
                 <div
                   style={{
                     flex: 1,
                     border: "1px solid #ddd",
                     borderRadius: 6,
                     padding: "8px 10px",
-                    backgroundColor:
-                      block.type === "code" ? "#f8f8f8" : "white",
+                    backgroundColor: block.type === "code" ? "#f8f8f8" : "white",
                     boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
                   }}
                 >
@@ -555,7 +589,7 @@ export default function App() {
                         <AutoResizeTextarea
                           value={block.content}
                           onChange={(v) => updateBlock(block.id, v)}
-                          placeholder={`// 例:\n// const p = await getPosts(2);\n// print(toCSV(p));\n// return p.content;`}
+                          placeholder={`// 例:\n// const posts = await getPosts({ limit: 3 });\n// print(postsToCSV(posts));\n// return posts.length;`}
                           minRows={1}
                           mono
                         />
@@ -595,5 +629,4 @@ export default function App() {
       </div>
     </div>
   );
-
 }
