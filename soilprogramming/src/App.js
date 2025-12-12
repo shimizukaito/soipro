@@ -1,5 +1,7 @@
 import { useLayoutEffect, useRef, useState, useEffect } from "react";
 
+// 設定した説明文が最初に出て、次のセクションへ移動するボタンを押すとセクションが進むようにする。
+
 /** ================================
  *  ヘルパー：CSVユーティリティ
  * ================================ */
@@ -103,7 +105,7 @@ function AutoResizeTextarea({
 
 export default function App() {
   const [blocks, setBlocks] = useState([]);
-  
+
   const [themes, setThemes] = useState([]);
   const [currentTheme, setCurrentTheme] = useState(1); // 今選択しているテーマID
 
@@ -203,7 +205,7 @@ export default function App() {
         content: "",
         output: "",
         order: nextOrder,
-        theme: currentTheme, 
+        theme: currentTheme,
       };
       setBlocks((prev) => [...prev, newBlock]);
     } catch (err) {
@@ -224,74 +226,111 @@ export default function App() {
   /** ================================
    * コード実行
    * ================================ */
+
+  // 取ってきたポストを使って違うプログラムを動かせるようにしたい
+  //  ブロックの実行結果を異なるブロックでも動かせるようにしたい
   const runCode = async (id) => {
-    const block = blocks.find((b) => b.id === id);
-    if (!block) return;
+  const block = blocks.find((b) => b.id === id);
+  if (!block) return;
 
-    setBlocks((prev) =>
-      prev.map((b) => (b.id === id ? { ...b, __running: true } : b))
-    );
+  // 実行中フラグON
+  setBlocks((prev) =>
+    prev.map((b) => (b.id === id ? { ...b, __running: true } : b))
+  );
 
-    let outputText = "";
+  let outputText = "";
 
-    const print = (...args) => {
-      outputText +=
-        (outputText ? "\n" : "") +
-        args
-          .map((v) =>
-            typeof v === "object" ? JSON.stringify(v, null, 2) : String(v)
-          )
-          .join(" ");
-    };
+  const print = (...args) => {
+    outputText +=
+      (outputText ? "\n" : "") +
+      args
+        .map((v) =>
+          typeof v === "object" ? JSON.stringify(v, null, 2) : String(v)
+        )
+        .join(" ");
+  };
 
-    const context = {
+  // options = { limit, theme } を受け取る形にする
+  const getPosts = async (options = {}) => {
+  const {
+    limit = 10,
+    theme = currentTheme,
+    output, // order番号（任意）
+  } = options;
 
-  //全部とってくるのに変更しよう。
-  getPost: async (n) => {
-    const res = await fetch(
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  params.set("theme", String(theme));
 
-      //getPostに渡せる引数は何を渡すかを決めたい（時間？）過去の何番目かの履歴は親切ではない
-      `http://localhost:3001/posts/history?n=${n}&theme=${currentTheme}`
-    );
-    if (!res.ok) throw new Error("履歴の取得に失敗しました。");
-    return await res.json();
-  },
+  const res = await fetch(
+    `http://localhost:3001/posts/history?${params.toString()}`
+  );
 
-  post: async (theme) => {
-    const res = await fetch(
-      `http://localhost:3001/posts/byTheme?theme=${theme}`
-    );
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(
-        `テーマ別postの取得に失敗しました: ${res.status} ${text}`
-      );
+  if (!res.ok) throw new Error("履歴の取得に失敗しました。");
+
+  // 常に配列
+  const posts = await res.json();
+
+  // output 指定があればフィルタ（order が一致するもののみ）
+  if (output !== undefined && output !== null) {
+    const orderNum = Number(output);
+    if (Number.isNaN(orderNum)) {
+      throw new Error("output には order 番号（数値）を指定してください。");
     }
-    return await res.json();
-  },
 
-  toCSV: (post) => postToCSV(post),
-  postsToCSV: (posts) => postsToCSV(posts),
-  print,
+    // 指定 order の投稿を抽出
+    const matched = posts.filter((p) => p.order === orderNum);
+
+    // 🔥 出力だけを返す（常に配列）
+    return matched.map((p) => ({ output: p.output }));
+  }
+
+  // output 指定なし → 全件返す
+  return posts;
 };
 
-    try {
-      const result = await asyncEval(block.content.trim(), context);
-      if (result !== undefined) {
-        outputText += (outputText ? "\n" : "") + String(result);
+
+  const context = {
+    // 新しい履歴取得関数
+    getPosts,
+
+    // 既存: テーマごとの全ポスト
+    post: async (theme) => {
+      const res = await fetch(
+        `http://localhost:3001/posts/byTheme?theme=${theme}`
+      );
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(
+          `テーマ別postの取得に失敗しました: ${res.status} ${text}`
+        );
       }
-    } catch (err) {
-      outputText = "⚠️ エラー: " + err.message;
-    }
+      return await res.json();
+    },
 
-    const updated = { ...block, output: outputText, __running: false };
-
-    try {
-      await saveToDatabase(updated);
-    } catch {}
-
-    setBlocks((prev) => prev.map((b) => (b.id === id ? updated : b)));
+    toCSV: (post) => postToCSV(post),
+    postsToCSV: (posts) => postsToCSV(posts),
+    print,
   };
+
+  try {
+    const result = await asyncEval(block.content.trim(), context);
+    if (result !== undefined) {
+      outputText += (outputText ? "\n" : "") + String(result);
+    }
+  } catch (err) {
+    outputText = "⚠️ エラー: " + err.message;
+  }
+
+  const updated = { ...block, output: outputText, __running: false };
+
+  try {
+    await saveToDatabase(updated);
+  } catch {}
+
+  setBlocks((prev) => prev.map((b) => (b.id === id ? updated : b)));
+};
+
 
   /** ================================
    * テキスト自動保存
@@ -301,7 +340,7 @@ export default function App() {
     if (!block || block.content.trim() === "") return;
     try {
       await saveToDatabase({ ...block, output: "" });
-    } catch {}
+    } catch { }
   };
 
   const buttonStyle = {
@@ -350,70 +389,70 @@ export default function App() {
    * UI
    * ================================ */
   return (
-  <div
-    style={{
-      fontFamily: "sans-serif",
-    }}
-  >
-    {/* 固定ヘッダー：作業コンテキスト + ブロック追加ボタン */}
     <div
       style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        background: "white",
-        borderBottom: "1px solid #ddd",
-        padding: "10px 24px 14px",
-        zIndex: 1000,
-        boxSizing: "border-box",
+        fontFamily: "sans-serif",
       }}
     >
-      {/* 作業コンテキスト（ボタンの上） */}
-      <div style={{ marginBottom: 10 }}>
-        <h2 style={{ margin: 0, fontSize: 18 }}>
-        {currentTheme ? currentTheme.title : "テーマの名前"}
-        </h2>
-        <p style={{ margin: "4px 0 0 0", color: "#666", fontSize: 13 }}>
-        ユーザー：pro助 / テーマID：{currentTheme}
-</p>
-      </div>
-
-      {/* ボタン行 */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <button
-          onClick={() => addBlock("code")}
-          style={buttonStyle}
-          onMouseOver={(e) => (e.currentTarget.style.background = "#eee")}
-          onMouseOut={(e) =>
-            (e.currentTarget.style.background = "transparent")
-          }
-        >
-          ＋ コード
-        </button>
-        <button
-          onClick={() => addBlock("text")}
-          style={buttonStyle}
-          onMouseOver={(e) => (e.currentTarget.style.background = "#eee")}
-          onMouseOut={(e) =>
-            (e.currentTarget.style.background = "transparent")
-          }
-        >
-          ＋ テキスト
-        </button>
-      </div>
-    </div>
-
-    {/* 👇 ヘッダーの下を2カラムレイアウトにする */}
-    <div
-      style={{
-        marginTop: 140, // ヘッダー分下げる
-        display: "flex",
-        height: "calc(100vh - 140px)", // 画面下まで使うなら
-      }}
-    >
-      {/* ← 左サイドバー（テーマ一覧） */}
+      {/* 固定ヘッダー：作業コンテキスト + ブロック追加ボタン */}
       <div
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          background: "white",
+          borderBottom: "1px solid #ddd",
+          padding: "10px 24px 14px",
+          zIndex: 1000,
+          boxSizing: "border-box",
+        }}
+      >
+        {/* 作業コンテキスト（ボタンの上） */}
+        <div style={{ marginBottom: 10 }}>
+          <h2 style={{ margin: 0, fontSize: 18 }}>
+            {currentTheme ? currentTheme.title : "テーマの名前"}
+          </h2>
+          <p style={{ margin: "4px 0 0 0", color: "#666", fontSize: 13 }}>
+            ユーザー：pro助 / テーマID：{currentTheme}
+          </p>
+        </div>
+
+        {/* ボタン行 */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            onClick={() => addBlock("code")}
+            style={buttonStyle}
+            onMouseOver={(e) => (e.currentTarget.style.background = "#eee")}
+            onMouseOut={(e) =>
+              (e.currentTarget.style.background = "transparent")
+            }
+          >
+            ＋ コード
+          </button>
+          <button
+            onClick={() => addBlock("text")}
+            style={buttonStyle}
+            onMouseOver={(e) => (e.currentTarget.style.background = "#eee")}
+            onMouseOut={(e) =>
+              (e.currentTarget.style.background = "transparent")
+            }
+          >
+            ＋ テキスト
+          </button>
+        </div>
+      </div>
+
+      {/* 👇 ヘッダーの下を2カラムレイアウトにする */}
+      <div
+        style={{
+          marginTop: 140, // ヘッダー分下げる
+          display: "flex",
+          height: "calc(100vh - 140px)", // 画面下まで使うなら
+        }}
+      >
+        {/* ← 左サイドバー（テーマ一覧） */}
+        <div
           style={{
             width: 260,
             borderRight: "1px solid #eee",
@@ -452,109 +491,109 @@ export default function App() {
           </ul>
         </div>
 
-      {/* → 右メインエリア（今までの blocks 一覧） */}
-      <div
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          display: "flex",
-          justifyContent: "center",
-        }}
-      >
-        <div style={{ width: "80%", maxWidth: 900, padding: "0 0 32px" }}>
-          {blocks.map((block, index) => (
-            <div
-              key={block.id}
-              style={{
-                display: "flex",
-                marginBottom: 16,
-              }}
-            >
-              {/* 添字番号 */}
-              <div style={indexLabelStyle}>[{index + 1}]</div>
-
-              {/* カード本体（ここは元のまま） */}
+        {/* → 右メインエリア（今までの blocks 一覧） */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            display: "flex",
+            justifyContent: "center",
+          }}
+        >
+          <div style={{ width: "80%", maxWidth: 900, padding: "0 0 32px" }}>
+            {blocks.map((block, index) => (
               <div
+                key={block.id}
                 style={{
-                  flex: 1,
-                  border: "1px solid #ddd",
-                  borderRadius: 6,
-                  padding: "8px 10px",
-                  backgroundColor:
-                    block.type === "code" ? "#f8f8f8" : "white",
-                  boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                  display: "flex",
+                  marginBottom: 16,
                 }}
               >
-                {block.type === "code" ? (
-                  <>
-                    <div style={{ display: "flex", alignItems: "flex-start" }}>
-                      {/* ▶ 実行ボタン */}
-                      <button
-                        onClick={() => runCode(block.id)}
-                        disabled={!!block.__running}
-                        style={{
-                          width: 36,
-                          height: 36,
-                          borderRadius: "50%",
-                          background: block.__running ? "#9E9E9E" : "#4CAF50",
-                          border: "none",
-                          color: "white",
-                          fontSize: 18,
-                          cursor: block.__running
-                            ? "not-allowed"
-                            : "pointer",
-                          marginRight: 10,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                        title={block.__running ? "実行中..." : "実行"}
-                      >
-                        ▶
-                      </button>
+                {/* 添字番号 */}
+                <div style={indexLabelStyle}>[{index + 1}]</div>
 
-                      <AutoResizeTextarea
-                        value={block.content}
-                        onChange={(v) => updateBlock(block.id, v)}
-                        placeholder={`// 例:\n// const p = await getPost(2);\n// print(toCSV(p));\n// return p.content;`}
-                        minRows={1}
-                        mono
-                      />
-                    </div>
+                {/* カード本体（ここは元のまま） */}
+                <div
+                  style={{
+                    flex: 1,
+                    border: "1px solid #ddd",
+                    borderRadius: 6,
+                    padding: "8px 10px",
+                    backgroundColor:
+                      block.type === "code" ? "#f8f8f8" : "white",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                  }}
+                >
+                  {block.type === "code" ? (
+                    <>
+                      <div style={{ display: "flex", alignItems: "flex-start" }}>
+                        {/* ▶ 実行ボタン */}
+                        <button
+                          onClick={() => runCode(block.id)}
+                          disabled={!!block.__running}
+                          style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: "50%",
+                            background: block.__running ? "#9E9E9E" : "#4CAF50",
+                            border: "none",
+                            color: "white",
+                            fontSize: 18,
+                            cursor: block.__running
+                              ? "not-allowed"
+                              : "pointer",
+                            marginRight: 10,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                          title={block.__running ? "実行中..." : "実行"}
+                        >
+                          ▶
+                        </button>
 
-                    {block.output && (
-                      <div
-                        style={{
-                          background: "#fff",
-                          border: "1px solid #ccc",
-                          borderRadius: 4,
-                          padding: 8,
-                          marginTop: 8,
-                          fontFamily: "monospace",
-                          whiteSpace: "pre",
-                        }}
-                      >
-                        {block.output}
+                        <AutoResizeTextarea
+                          value={block.content}
+                          onChange={(v) => updateBlock(block.id, v)}
+                          placeholder={`// 例:\n// const p = await getPosts(2);\n// print(toCSV(p));\n// return p.content;`}
+                          minRows={1}
+                          mono
+                        />
                       </div>
-                    )}
-                  </>
-                ) : (
-                  <AutoResizeTextarea
-                    value={block.content}
-                    onChange={(v) => updateBlock(block.id, v)}
-                    onBlur={() => handleBlur(block.id)}
-                    placeholder="ここにテキストを書く..."
-                    minRows={1}
-                    style={{ fontSize: 15 }}
-                  />
-                )}
+
+                      {block.output && (
+                        <div
+                          style={{
+                            background: "#fff",
+                            border: "1px solid #ccc",
+                            borderRadius: 4,
+                            padding: 8,
+                            marginTop: 8,
+                            fontFamily: "monospace",
+                            whiteSpace: "pre",
+                          }}
+                        >
+                          {block.output}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <AutoResizeTextarea
+                      value={block.content}
+                      onChange={(v) => updateBlock(block.id, v)}
+                      onBlur={() => handleBlur(block.id)}
+                      placeholder="ここにテキストを書く..."
+                      minRows={1}
+                      style={{ fontSize: 15 }}
+                    />
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
     </div>
-  </div>
-);
+  );
 
 }
