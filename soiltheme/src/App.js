@@ -14,15 +14,13 @@ const initialRowData = {
 
 function App() {
   // --- State管理 ---
-  // 初期値をDB連携用に変更 (空/null)
   const [themes, setThemes] = useState([]); 
   const [selectedThemeId, setSelectedThemeId] = useState(null); 
   const [rows, setRows] = useState([initialRowData]); 
   const [themeTitle, setThemeTitle] = useState(''); 
   const [loading, setLoading] = useState(true); // 初期ロードはtrue
 
-  // --- API連携ロジック ---
-
+  
   // 1. テーマ一覧取得 (GET /themes)
   const fetchThemes = useCallback(async () => {
     setLoading(true); 
@@ -62,23 +60,29 @@ function App() {
       const response = await fetch(`${API_BASE_URL}/themes/${themeId}`);
       if (!response.ok) throw new Error('テーマデータの取得に失敗');
       
-      const theme = await response.json();
-      setThemeTitle(theme.title);
-      
-      // ★ 修正: theme.content から theme.sections に変更
-      if (theme.sections) { 
-        try {
-          // ★ 修正: theme.content から theme.sections に変更
-          const parsedRows = JSON.parse(theme.sections); 
-          // question番号を整理し、初期構造を適用
-          const cleanRows = parsedRows.map((row, index) => ({
-              ...initialRowData, 
-              ...row,
-              question: index + 1
-          }));
-          setRows(cleanRows.length > 0 ? cleanRows : [{ ...initialRowData, question: 1 }]);
-        } catch (e) {
-          console.error("JSONパースエラー (DBデータ):", e);
+  const theme = await response.json();
+  setThemeTitle(theme.title);
+
+  if (theme.sections) { 
+    try {
+      const parsedRows = theme.sections; 
+    
+      if (!Array.isArray(parsedRows)) {
+       console.warn("テーマデータが配列ではありません。初期化します。");
+       setRows([{ ...initialRowData, question: 1 }]);
+       return;
+    }
+    
+      // question番号を整理し、初期構造を適用
+      const cleanRows = parsedRows.map((row, index) => ({
+        ...initialRowData, 
+        ...row,
+        question: index + 1
+    }));
+    setRows(cleanRows.length > 0 ? cleanRows : [{ ...initialRowData, question: 1 }]);
+  } catch (e) {
+
+    console.error("JSONパースエラー (DBデータ):", e);
           setRows([{ ...initialRowData, question: 1 }]);
         }
       } else {
@@ -283,7 +287,7 @@ function App() {
           </div>
 
           <div className="json-output">
-            <h3>💡 JSON出力形式 (保存される内容のプレビュー)</h3>
+            <h4>💡 JSON出力形式 (保存される内容のプレビュー)</h4>
             <pre><code>{jsonOutput}</code></pre>
           </div>
         </>
