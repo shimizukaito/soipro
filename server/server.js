@@ -28,22 +28,31 @@ app.get("/posts", async (req, res) => {
   }
 });
 
-// ===========================
-// 2️⃣ 履歴データの取得（isLatest = false）
-//     GET /posts/history?limit=5&theme=1
-// ===========================
+
 app.get("/posts/history", async (req, res) => {
   const themeId = Number(req.query.theme) || 1;
-
-  const limit = req.query.limit
-    ? Number(req.query.limit)
-    : req.query.n
-    ? Number(req.query.n)
-    : 10;
+  const order = req.query.order !== undefined ? Number(req.query.order) : undefined;
+  const latest = req.query.latest === "true";
 
   try {
+    // ★ order + latest 指定 → 最新1件だけ
+    if (order !== undefined && latest) {
+      const post = await prisma.post.findFirst({
+        where: { theme: themeId, order, isLatest: false },
+        orderBy: { createdAt: "desc" },
+      });
+      return res.json(post ? [post] : []);
+    }
+
+    // 通常の履歴取得
+    const limit = req.query.limit ? Number(req.query.limit) : 10;
+
     const posts = await prisma.post.findMany({
-      where: { theme: themeId, isLatest: false },
+      where: {
+        theme: themeId,
+        isLatest: false,
+        ...(order !== undefined ? { order } : {}),
+      },
       orderBy: { createdAt: "desc" },
       take: limit,
     });
@@ -54,6 +63,7 @@ app.get("/posts/history", async (req, res) => {
     res.status(500).json({ message: "履歴の取得に失敗しました。" });
   }
 });
+
 
 // ===========================
 // 3️⃣ 次に使える order 番号を取得
