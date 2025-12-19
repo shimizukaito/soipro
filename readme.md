@@ -98,12 +98,12 @@ const posts = await getPosts(1);
 
 ### 各フィールドの意味
 フィールド	説明
-id	投稿ID
-content	投稿内容（テキストまたはコード）
-output	実行結果
-order	投稿番号
-theme	テーマID
-user	投稿者
+- id	投稿ID
+- content	投稿内容（テキストまたはコード）
+- output	実行結果
+- order	投稿番号
+- theme	テーマID
+- user	投稿者
 createdAt	作成日時
 isLatest	最新かどうか
 
@@ -131,9 +131,10 @@ getPosts が取得するのは 過去の履歴データです。
 
 返り値は常に配列です（1件のみでも配列）
 
+データが空の場合（実行結果がない場合など）はからの文字列になっています。
+
 
 # 関連関数（参考）
-* post(theme)      指定したテーマに属するすべての投稿を取得します
 
 * toCSV(post)       投稿1件をCSV形式に変換します
 

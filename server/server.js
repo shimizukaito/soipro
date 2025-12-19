@@ -35,10 +35,13 @@ app.get("/posts/history", async (req, res) => {
   const latest = req.query.latest === "true";
 
   try {
-    // ★ order + latest 指定 → 最新1件だけ
+    // ★ order指定 & latest=true → 最新1件（テキストも含む）
     if (order !== undefined && latest) {
       const post = await prisma.post.findFirst({
-        where: { theme: themeId, order, isLatest: false },
+        where: {
+          theme: themeId,
+          order,
+        },
         orderBy: { createdAt: "desc" },
       });
       return res.json(post ? [post] : []);
@@ -63,6 +66,7 @@ app.get("/posts/history", async (req, res) => {
     res.status(500).json({ message: "履歴の取得に失敗しました。" });
   }
 });
+
 
 
 // ===========================
