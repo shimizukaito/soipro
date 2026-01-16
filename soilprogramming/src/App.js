@@ -8,6 +8,7 @@
 //セクションが終わった時にもう一度初めからできるボタンがあるといいね。
 //引数をもっと工夫する。fieldという引数を用意して文字で"output"とかを指定すると取れるようにするとかね
 //orderを
+//最終成果レポート（セットアップの仕方、教材の作り方などをまとめてレポートで提出）ギットハブで提出
 
 import { useLayoutEffect, useRef, useState, useEffect } from "react";
 
