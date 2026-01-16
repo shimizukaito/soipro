@@ -1,3 +1,14 @@
+//表示の順番を
+// テキスト
+//データ
+//プログラム
+//の順番にする
+
+//リロードすると脱色されるので色を残して置けるといいね。
+//セクションが終わった時にもう一度初めからできるボタンがあるといいね。
+//引数をもっと工夫する。fieldという引数を用意して文字で"output"とかを指定すると取れるようにするとかね
+//orderを
+
 import { useLayoutEffect, useRef, useState, useEffect } from "react";
 
 /** ================================
@@ -246,10 +257,10 @@ export default function App() {
 
         const allQuestions = Array.isArray(sections)
           ? sections.flatMap((s) => {
-            if (s && s.question !== undefined) return [s];
-            if (s && Array.isArray(s.questions)) return s.questions;
-            return [];
-          })
+              if (s && s.question !== undefined) return [s];
+              if (s && Array.isArray(s.questions)) return s.questions;
+              return [];
+            })
           : [];
 
         allQuestions.sort((a, b) => Number(a.question) - Number(b.question));
@@ -267,6 +278,14 @@ export default function App() {
 
     fetchQuestions();
   }, [currentTheme]);
+
+  /** ================================
+   * ✅ セクション進行を最初からに戻す（画面/DBは消さない）
+   * ================================ */
+  const resetSection = () => {
+    setCurrentQuestion(1);
+    setNextQuestionNum(1);
+  };
 
   /** ================================
    * ブロック追加（手動）
@@ -374,41 +393,40 @@ export default function App() {
     };
 
     const getPosts = async (options = {}) => {
-  const {
-    limit = 10,                 // 取得件数（履歴用）
-    theme = currentTheme,       // テーマID（省略時は現在のテーマ）
-    order,                      // order番号（指定時）
-    latest = true,              // order指定時は最新のみ返す
-  } = options;
+      const {
+        limit = 10, // 取得件数（履歴用）
+        theme = currentTheme, // テーマID（省略時は現在のテーマ）
+        order, // order番号（指定時）
+        latest = true, // order指定時は最新のみ返す
+      } = options;
 
-  const params = new URLSearchParams();
-  params.set("theme", String(theme));
+      const params = new URLSearchParams();
+      params.set("theme", String(theme));
 
-  // 履歴取得用
-  if (order === undefined) {
-    params.set("limit", String(limit));
-  }
+      // 履歴取得用
+      if (order === undefined) {
+        params.set("limit", String(limit));
+      }
 
-  // order 指定がある場合
-  if (order !== undefined) {
-    if (Number.isNaN(Number(order))) {
-      throw new Error("order には数値を指定してください");
-    }
-    params.set("order", String(order));
-    if (latest) {
-      params.set("latest", "true");
-    }
-  }
+      // order 指定がある場合
+      if (order !== undefined) {
+        if (Number.isNaN(Number(order))) {
+          throw new Error("order には数値を指定してください");
+        }
+        params.set("order", String(order));
+        if (latest) {
+          params.set("latest", "true");
+        }
+      }
 
-  const res = await fetch(`${API_BASE}/posts/history?${params.toString()}`);
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`履歴の取得に失敗しました: ${res.status} ${text}`);
-  }
+      const res = await fetch(`${API_BASE}/posts/history?${params.toString()}`);
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`履歴の取得に失敗しました: ${res.status} ${text}`);
+      }
 
-  return await res.json(); // 常に配列を返す
-};
-
+      return await res.json(); // 常に配列を返す
+    };
 
     const context = {
       getPosts,
@@ -436,7 +454,7 @@ export default function App() {
 
     try {
       await saveToDatabase(updated);
-    } catch { }
+    } catch {}
 
     setBlocks((prev) => prev.map((b) => (b.id === id ? updated : b)));
   };
@@ -449,7 +467,7 @@ export default function App() {
     if (!block || block.content.trim() === "") return;
     try {
       await saveToDatabase({ ...block, output: "" });
-    } catch { }
+    } catch {}
   };
 
   const buttonStyle = {
@@ -501,6 +519,16 @@ export default function App() {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {/* ✅ 追加：最初から（進行だけリセット） */}
+          <button
+            onClick={resetSection}
+            style={buttonStyle}
+            onMouseOver={(e) => (e.currentTarget.style.background = "#eee")}
+            onMouseOut={(e) => (e.currentTarget.style.background = "transparent")}
+          >
+            最初から
+          </button>
+
           <button
             onClick={addNextQuestionBlock}
             style={buttonStyle}
